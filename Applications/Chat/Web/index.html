@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link href="/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/css/jquery-sinaEmotion-2.1.0.min.css" rel="stylesheet">
+    <link href="/css/style.css" rel="stylesheet">
+</head>
+<body>
+<div>在线人数 <span id="count">0</span>人</div>
+<div class="container">
+    <div class="row clearfix">
+        <div class="col-md-1 column">
+        </div>
+        <div class="col-md-6 column">
+            <div class="thumbnail">
+                <div class="caption" id="dialog"></div>
+            </div>
+
+            <textarea class="textarea thumbnail" id="textarea"></textarea>
+            <div class="say-btn">
+                <input type="button" class="btn btn-default" value="发表" id="submit" />
+            </div>
+
+        </div>
+
+    </div>
+</div>
+<script type="text/javascript" src="/js/swfobject.js"></script>
+<script type="text/javascript" src="/js/md5.min.js"></script>
+<script type="text/javascript" src="/js/web_socket.js"></script>
+<script type="text/javascript" src="/js/jquery.min.js"></script>
+<!--<script type="text/javascript" src="/js/jsbn.js"></script>-->
+<!--<script type="text/javascript" src="/js/rsa.js"></script>-->
+<script src="//unpkg.com/crypto-js/crypto-js.js"></script>
+<script src="http://passport.cnblogs.com/scripts/jsencrypt.min.js"></script>
+<!--<script type="text/javascript" src="/js/jquery-sinaEmotion-2.1.0.min.js"></script>-->
+
+<script>
+    if (typeof console == "undefined") { this.console = { log: function (msg) {  } };}
+    // 如果浏览器不支持websocket，会使用这个flash自动模拟websocket协议，此过程对开发者透明
+    WEB_SOCKET_SWF_LOCATION = "/swf/WebSocketMain.swf";
+    // 开启flash的websocket debug
+    WEB_SOCKET_DEBUG = true;
+
+    var ws, // webSocket 对象
+        roomId, // socket聊天房间Id
+        userName, // 用户昵称
+        userPhoto, // 用户头像
+        connectIP, // socket服务Ip
+        ws_token; // socket服务token
+
+    roomId = 1;
+    userName = '测试用户'+Math.ceil(Math.random()*100000000000000);
+    photoList = [
+        'http://p.qlogo.cn/bizmail/tlYWG3BQYpfTaDjXrecUuFLrhFw3SFWvzyt57nKD3UUNxOYTbibKQXQ/0',
+        'http://p.qlogo.cn/bizmail/MnSCM0poHfeyHSia4REshuvpjZ3WuRmhAfL6wwEHibZIgB2BNF20WFicA/0',
+        'http://p.qlogo.cn/bizmail/4963SvUfibia7waIicibxJaQ9mJhx44UyuLWp65elaVaB6yaguTozv7l6g/0',
+        'http://p.qlogo.cn/bizmail/Lvp7hJyuG0ibHG8jfp3qCvW86ljSlBKUWm8oDciclg1cT2Diarn2QKT8A/0',
+        'http://p.qlogo.cn/bizmail/lbkdteGoVocGJicH4hlADUxtYJaXXcpF4qZOF5dHLMGCpXiaDcgwe8JQ/0',
+        'http://p.qlogo.cn/bizmail/icUm0lvAiaTF5Ym4EDnxvNkpbLhXe8MhuTDW2enzPl7tqh4ibwoW4zUJw/0'
+    ];
+    userPhoto = photoList[Math.ceil(Math.random()*5)];
+    connectIP = '192.168.1.53';
+    ws_token = 'abcdefghijklmnopqrstuvwxyz*.123456'; // 接口token
+
+    connect();
+    function connect() {
+        // 创建websocket
+        ws = new WebSocket("ws://"+connectIP+":7272");
+        // 当socket连接打开时，输入用户名
+        ws.onopen = onopen;
+        // 当有消息时根据消息类型显示不同信息
+        ws.onmessage = onmessage;
+        ws.onclose = function() {
+            console.log("连接关闭，定时重连");
+            connect();
+        };
+        ws.onerror = function() {
+            console.log("出现错误");
+        };
+    }
+
+    //  连接建立时发送登录信息
+    function onopen() {
+        // 登录
+        var login_data = {
+            type: "login",
+            room_id: roomId,
+            client_name: userName,
+            to_client_photo: userPhoto,
+            _token: ws_token,
+            _timestamp: Math.round(new Date().getTime()/1000)
+        };
+        login_data = JSON.stringify(login_data);
+
+        // 生成加密checksum 推荐后端加密后传值
+        var full_data_obj = login_data; // copy
+        full_data_obj = JSON.parse(full_data_obj);
+        login_data = JSON.parse(login_data);
+        full_data_obj['_secret'] = login_data['_token']+'zt'+login_data['_timestamp']; // secret
+        login_data['_checksum'] = object_md5(full_data_obj);
+        login_data = JSON.stringify(login_data);
+        console.log("websocket握手成功，发送登录数据："+crypto(login_data,1));
+        ws.send(crypto(login_data,1));
+
+    }
+
+    // 服务端发来消息时
+    function onmessage(e) {
+        console.log("收到消息："+e.data);
+        console.log("收到消息解密后："+trimStr(crypto(e.data,2)));
+        // 在线人数
+        var count = $('#count').html();
+        var data = JSON.parse(trimStr(crypto(e.data,2)));
+        switch(data['type']){
+            // 服务端ping客户端
+            case 'ping':
+                ws.send(crypto('{"type":"pong"}',1));
+                break;
+            // 登录 更新用户列表
+            case 'login':
+
+                console.log(data['client_name']+'进入房间!');
+                if (!data.client_count && data.client_count!== 0){
+                    $('#count').html(++count);
+                } else {
+                    console.log("直播人数重置！");
+                    $('#count').html(data.client_count);
+                    count = data.client_count;
+                    $('#count').html(++count);
+                }
+                break;
+            // 发言
+            case 'say':
+                say(data['from_client_id'], data['from_client_name'], data['content'], data['time'],data['from_client_photo']);
+                break;
+            // 用户退出 更新用户列表
+            case 'logout':
+                $('#count').html(--count);
+                console.log(data['from_client_name']+'已离开!');
+        }
+    }
+
+    $('#submit').click(onSubmit);
+    // 提交对话
+    function onSubmit() {
+        var input = document.getElementById("textarea");
+        var to_client_id = 'all'; // 私发还是群发
+        var to_client_name = ''; // 私发需要加名称
+        var data = {
+            type: "say",
+            to_client_id: to_client_id,
+            to_client_name: to_client_name,
+            content: input.value.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r'),
+            to_client_photo: userPhoto,
+            _token: ws_token,
+            _timestamp: Math.round(new Date().getTime()/1000)
+        };
+        data = JSON.stringify(data);
+
+        // 生成加密checksum 推荐后端加密后传值
+//        var full_data_obj = data; // copy
+//        full_data_obj = JSON.parse(full_data_obj);
+//        data = JSON.parse(data);
+//        full_data_obj['_secret'] = data['_token']+data['_timestamp']; // secret
+//        data['_checksum'] = object_md5(full_data_obj);
+//        data = JSON.stringify(data);
+        console.log('发送消息：'+crypto(data,1));
+        console.log('发送消息：'+data);
+        ws.send(crypto(data,1));
+        input.value = "";
+        input.focus();
+    }
+
+    // 新增聊天数据
+    function say(from_client_id, from_client_name, content, time,photo)
+    {
+        $("#dialog").append(
+            '<div class="speech_item">' +
+                '<img src="'+ photo + '" class="user_icon" /> ' +
+                from_client_name +
+                ' <br> '+
+                time +
+                '<div style="clear:both;"></div>' +
+                '<p class="triangle-isosceles top">' +
+                    content +
+                '</p> ' +
+            '</div>'
+        );
+    }
+
+
+    // md5 加密验证
+    object_md5 = function (obj) {
+        var keys = Object.keys(obj).sort();
+        var stringfy = '', prop;
+        for (var i = 0; i < keys.length; i++) {
+            prop = keys[i];
+            if(stringfy != '') stringfy += '&';
+            stringfy += (prop + '=' + obj[prop]);
+        }
+
+        return md5(stringfy);
+    };
+
+    // AES加密 type 1加密 2解密
+    function crypto (text,type) {
+        var key = CryptoJS.enc.Latin1.parse('*zt$zhengwu%win.'); //为了避免补位，直接用16位的秘钥
+        var iv = CryptoJS.enc.Latin1.parse('hahahaha!@#$%^&*'); //16位初始向量
+        var res;
+        if (type == 1) {
+            text = CryptoJS.enc.Utf8.parse(text);
+            var encrypted = CryptoJS.AES.encrypt(text, key, {
+                iv: iv,
+                mode: CryptoJS.mode.CBC,
+                padding: CryptoJS.pad.ZeroPadding
+            });
+            res = encrypted.toString();
+        } else {
+            var decrypted =CryptoJS.AES.decrypt(text,key, {
+                    iv: iv,
+                    mode: CryptoJS.mode.CBC,
+                    padding: CryptoJS.pad.ZeroPadding
+                });
+            res = decrypted.toString(CryptoJS.enc.Utf8);
+        }
+
+        return res;
+    }
+
+    // 去除加密后多余字符串
+    function trimStr(str) {
+
+        return str.replace(/[^}]*$/,"");
+    }
+
+    // RSA加密 type 1加密 2解密
+    function crypto1(text,type) {
+        // public key notice the '\'
+        var pem = '-----BEGIN PUBLIC KEY-----\
+            MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCnWMtQjfgaN+TMOOPGI5kOkW/Z\
+            RHkBKVhJKTx2z5237/PEOiXvrhURNnHRo+xR3p8k1xnXw4mm1RijxR+zrL7jpINJ\
+            CI8s+vM+MahCVHsp+uqOTFAKyXBQxWNOeYRgxTxyD45lLqybdgGuZnN5TQk7ovsj\
+            yXd2ND2IgGHDQgnqAwIDAQAB\
+            -----END PUBLIC KEY-----';
+        var encrypt = new JSEncrypt();
+        encrypt.setPublicKey(pem);
+        var data = '';
+        if (type == 1) {
+            console.log(text);
+           data = encrypt.encrypt(text);
+           console.log(data);
+        } else {
+            data = encrypt.decrypt(text);
+        }
+        return data;
+    }
+</script>
+</body>
+</html>
